@@ -37,6 +37,8 @@ class message_form extends \moodleform {
      * Form definition.
      */
     public function definition() {
+        global $SESSION;
+
         $mform = $this->_form;
 
         $mform->addElement('header', 'composemessage', get_string('composemessage', 'tool_bulkmessaging'));
@@ -44,6 +46,15 @@ class message_form extends \moodleform {
         $mform->addElement('advcheckbox', 'sendtoall', get_string('sendtoall', 'tool_bulkmessaging'),
             get_string('sendtoall_desc', 'tool_bulkmessaging'));
         $mform->setDefault('sendtoall', 0);
+
+        // CSV recipients checkbox — only visible when CSV users are loaded.
+        if (!empty($SESSION->bulkmessaging_csvusers)) {
+            $mform->addElement('advcheckbox', 'usecsv', get_string('usecsv', 'tool_bulkmessaging'),
+                get_string('usecsv_desc', 'tool_bulkmessaging'));
+            $mform->setDefault('usecsv', 1);
+            $mform->disabledIf('usecsv', 'sendtoall', 'checked');
+            $mform->disabledIf('sendtoall', 'usecsv', 'checked');
+        }
 
         $mform->addElement('text', 'subject', get_string('subject', 'tool_bulkmessaging'), ['size' => 60]);
         $mform->setType('subject', PARAM_TEXT);
@@ -62,6 +73,9 @@ class message_form extends \moodleform {
         $mform->setType('messagebody', PARAM_RAW);
         $mform->setDefault('messagebody', ['text' => '', 'format' => FORMAT_HTML]);
         $mform->addRule('messagebody', null, 'required', null, 'server');
+
+        $mform->addElement('static', 'placeholdersinfo', get_string('placeholders', 'tool_bulkmessaging'),
+            \html_writer::div(get_string('placeholders_help', 'tool_bulkmessaging'), 'alert alert-info'));
 
         $this->add_action_buttons(true, get_string('sendmessage', 'tool_bulkmessaging'));
     }

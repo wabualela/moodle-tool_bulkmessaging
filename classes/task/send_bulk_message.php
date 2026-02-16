@@ -69,22 +69,27 @@ class send_bulk_message extends adhoc_task {
 
         foreach ($userids as $userid) {
             try {
-                $userto = $DB->get_record('user', ['id' => $userid, 'deleted' => 0, 'suspended' => 0]);
+                $userto = $DB->get_record('user', ['id' => $userid, 'deleted' => 0, 'suspended' => 0],
+                    'id, firstname, lastname, email, username, mailformat, auth, ' .
+                    'firstnamephonetic, lastnamephonetic, middlename, alternatename');
                 if (!$userto) {
                     $failedcount++;
                     continue;
                 }
+
+                $usersubject = $this->replace_placeholders($subject, $userto);
+                $userbody = $this->replace_placeholders($messagebody, $userto);
 
                 $message = new \core\message\message();
                 $message->component = 'tool_bulkmessaging';
                 $message->name = 'bulknotification';
                 $message->userfrom = $userfrom;
                 $message->userto = $userto;
-                $message->subject = $subject;
-                $message->fullmessage = html_to_text($messagebody);
+                $message->subject = $usersubject;
+                $message->fullmessage = html_to_text($userbody);
                 $message->fullmessageformat = FORMAT_HTML;
-                $message->fullmessagehtml = $messagebody;
-                $message->smallmessage = shorten_text(html_to_text($messagebody), 100);
+                $message->fullmessagehtml = $userbody;
+                $message->smallmessage = shorten_text(html_to_text($userbody), 100);
                 $message->notification = 1;
 
                 message_send($message);
@@ -123,5 +128,23 @@ class send_bulk_message extends adhoc_task {
         }
 
         $transaction->allow_commit();
+    }
+
+    /**
+     * Replace placeholders in text with user-specific values.
+     *
+     * @param string $text The text containing placeholders.
+     * @param \stdClass $user The user object.
+     * @return string The text with placeholders replaced.
+     */
+    protected function replace_placeholders(string $text, \stdClass $user): string {
+        $placeholders = [
+            '{fullname}' => fullname($user),
+            '{firstname}' => $user->firstname,
+            '{lastname}' => $user->lastname,
+            '{email}' => $user->email,
+            '{username}' => $user->username,
+        ];
+        return str_replace(array_keys($placeholders), array_values($placeholders), $text);
     }
 }

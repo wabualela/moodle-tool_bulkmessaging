@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version information for tool_bulkmessaging.
+ * Web service function definitions for tool_bulkmessaging.
  *
  * @package    tool_bulkmessaging
  * @copyright  2026 Moddaker
@@ -24,8 +24,13 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2026021601;
-$plugin->requires  = 2025040800;
-$plugin->component = 'tool_bulkmessaging';
-$plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '0.2.0';
+$functions = [
+    'tool_bulkmessaging_get_message_progress' => [
+        'classname' => 'tool_bulkmessaging\\external\\get_message_progress',
+        'methodname' => 'execute',
+        'description' => 'Get the progress of a bulk message.',
+        'type' => 'read',
+        'ajax' => true,
+        'capabilities' => 'tool/bulkmessaging:sendmessage',
+    ],
+];

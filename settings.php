@@ -32,6 +32,14 @@ $ADMIN->add('accounts', new admin_externalpage(
     'tool/bulkmessaging:sendmessage'
 ));
 
+// Add CSV upload page under Users > Accounts.
+$ADMIN->add('accounts', new admin_externalpage(
+    'toolbulkmessagingcsvupload',
+    get_string('csvupload', 'tool_bulkmessaging'),
+    "$CFG->wwwroot/$CFG->admin/tool/bulkmessaging/csvupload.php",
+    'tool/bulkmessaging:sendmessage'
+));
+
 // Add history page under Users > Accounts.
 $ADMIN->add('accounts', new admin_externalpage(
     'toolbulkmessaginghistory',

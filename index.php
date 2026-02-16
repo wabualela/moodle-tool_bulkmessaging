@@ -38,9 +38,21 @@ if (empty($CFG->messaging)) {
 
 $confirm = optional_param('confirm', 0, PARAM_BOOL);
 $sendtoall = optional_param('sendtoall', 0, PARAM_BOOL);
+$page = optional_param('page', 0, PARAM_INT);
+$perpage = 20;
+$clearcsv = optional_param('clearcsv', 0, PARAM_BOOL);
+$usecsv = optional_param('usecsv', 0, PARAM_BOOL);
+
+// Handle clearing CSV selection.
+if ($clearcsv && confirm_sesskey()) {
+    unset($SESSION->bulkmessaging_csvusers);
+    redirect(new moodle_url("/$CFG->admin/tool/bulkmessaging/index.php"));
+}
 
 $baseurl = new moodle_url("/$CFG->admin/tool/bulkmessaging/index.php");
 $historyurl = new moodle_url("/$CFG->admin/tool/bulkmessaging/history.php");
+
+$hascsvusers = !empty($SESSION->bulkmessaging_csvusers);
 
 // Set up user filtering.
 $ufiltering = new user_filtering(null, $baseurl);
@@ -76,8 +88,13 @@ if ($confirm && confirm_sesskey()) {
     $messagebody = required_param('messagebody', PARAM_RAW);
     $messageformat = required_param('messageformat', PARAM_INT);
 
-    // Re-check sendtoall: rebuild query without filters if sending to all.
-    if ($sendtoall) {
+    // Re-check sendtoall or usecsv: rebuild query accordingly.
+    if ($usecsv && $hascsvusers) {
+        list($insql, $inparams) = $DB->get_in_or_equal($SESSION->bulkmessaging_csvusers, SQL_PARAMS_NAMED);
+        $usersql = "SELECT u.id FROM {user} u WHERE u.deleted = 0 AND u.suspended = 0 AND u.id $insql";
+        $userparams = $inparams;
+        $usercount = $DB->count_records_sql("SELECT COUNT(*) FROM ({$usersql}) subq", $userparams);
+    } else if ($sendtoall) {
         $usersql = "SELECT u.id FROM {user} u WHERE u.deleted = 0 AND u.suspended = 0 AND u.id > 1";
         $userparams = [];
         $usercount = $DB->count_records_sql("SELECT COUNT(*) FROM ({$usersql}) subq", $userparams);
@@ -90,7 +107,9 @@ if ($confirm && confirm_sesskey()) {
 
     // Serialize filter data for the log.
     $filterdata = '';
-    if ($sendtoall) {
+    if ($usecsv && $hascsvusers) {
+        $filterdata = json_encode(['csvupload' => true, 'csvusercount' => count($SESSION->bulkmessaging_csvusers)]);
+    } else if ($sendtoall) {
         $filterdata = json_encode(['sendtoall' => true]);
     } else if (!empty($SESSION->user_filtering)) {
         $simplifiedfilters = [];
@@ -160,9 +179,15 @@ if ($confirm && confirm_sesskey()) {
 // Handle form submission — show confirmation page.
 if ($formdata = $msgform->get_data()) {
     $sendtoall = !empty($formdata->sendtoall);
+    $usecsv = !empty($formdata->usecsv);
 
-    // If send to all, rebuild the count without filters.
-    if ($sendtoall) {
+    // Rebuild query based on selection mode.
+    if ($usecsv && $hascsvusers) {
+        list($insql, $inparams) = $DB->get_in_or_equal($SESSION->bulkmessaging_csvusers, SQL_PARAMS_NAMED);
+        $usersql = "SELECT u.id FROM {user} u WHERE u.deleted = 0 AND u.suspended = 0 AND u.id $insql";
+        $userparams = $inparams;
+        $usercount = $DB->count_records_sql("SELECT COUNT(*) FROM ({$usersql}) subq", $userparams);
+    } else if ($sendtoall) {
         $usersql = "SELECT u.id FROM {user} u WHERE u.deleted = 0 AND u.suspended = 0 AND u.id > 1";
         $userparams = [];
         $usercount = $DB->count_records_sql("SELECT COUNT(*) FROM ({$usersql}) subq", $userparams);
@@ -173,7 +198,7 @@ if ($formdata = $msgform->get_data()) {
             \core\output\notification::NOTIFY_ERROR);
     }
 
-    if (!$sendtoall && !$hasactivefilters) {
+    if (!$sendtoall && !$usecsv && !$hasactivefilters) {
         redirect($baseurl, get_string('filtersrequired', 'tool_bulkmessaging'), null,
             \core\output\notification::NOTIFY_ERROR);
     }
@@ -216,6 +241,7 @@ if ($formdata = $msgform->get_data()) {
         'messagebody' => $messagebody,
         'messageformat' => $messageformat,
         'sendtoall' => $sendtoall ? 1 : 0,
+        'usecsv' => $usecsv ? 1 : 0,
     ]);
     $confirmbtn = new single_button($confirmurl, get_string('confirm'), 'post', single_button::BUTTON_DANGER);
     $cancelbtn = new single_button($baseurl, get_string('cancel'), 'get');
@@ -267,6 +293,58 @@ if ($hasactivefilters) {
         get_string('alluserscount', 'tool_bulkmessaging', $alluserscount),
         \core\output\notification::NOTIFY_INFO
     );
+}
+
+// Display CSV user banner if CSV users are loaded.
+if ($hascsvusers) {
+    $csvcount = count($SESSION->bulkmessaging_csvusers);
+    $clearurl = new moodle_url($baseurl, ['clearcsv' => 1, 'sesskey' => sesskey()]);
+    $clearlink = html_writer::link($clearurl, get_string('clearcsv', 'tool_bulkmessaging'),
+        ['class' => 'btn btn-sm btn-outline-danger ml-2']);
+    echo $OUTPUT->notification(
+        get_string('csvusersloaded', 'tool_bulkmessaging', $csvcount) . ' ' . $clearlink,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
+// Display user list table when filters are active and there are matching users.
+if ($hasactivefilters && $usercount > 0) {
+    $userslistsql = "SELECT u.id, u.firstname, u.lastname, u.email, u.city, u.country, u.lastaccess
+                       FROM {user} u
+                      WHERE u.deleted = 0 AND u.suspended = 0 AND u.id > 1 AND $filtersql
+                   ORDER BY u.lastname, u.firstname";
+    $userslist = $DB->get_records_sql($userslistsql, $filterparams, $page * $perpage, $perpage);
+
+    if ($userslist) {
+        echo $OUTPUT->heading(get_string('userlist', 'tool_bulkmessaging'), 4);
+
+        $table = new html_table();
+        $table->head = [
+            get_string('fullname'),
+            get_string('email'),
+            get_string('city') . ' / ' . get_string('country'),
+            get_string('lastaccess'),
+        ];
+        $table->attributes['class'] = 'generaltable';
+
+        foreach ($userslist as $u) {
+            $profileurl = new moodle_url('/user/profile.php', ['id' => $u->id]);
+            $fullname = html_writer::link($profileurl, fullname($u));
+            $location = [];
+            if (!empty($u->city)) {
+                $location[] = $u->city;
+            }
+            if (!empty($u->country)) {
+                $location[] = get_string($u->country, 'countries');
+            }
+            $lastaccess = $u->lastaccess ? userdate($u->lastaccess) : get_string('never');
+            $table->data[] = [$fullname, $u->email, implode(', ', $location), $lastaccess];
+        }
+        echo html_writer::table($table);
+
+        $pagingurl = new moodle_url($baseurl);
+        echo $OUTPUT->paging_bar($usercount, $page, $perpage, $pagingurl);
+    }
 }
 
 // Always display compose form — send-to-all checkbox allows bypassing filters.

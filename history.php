@@ -150,10 +150,10 @@ $statuslabels = [
 ];
 
 $statusclasses = [
-    0 => 'badge bg-secondary',
-    1 => 'badge bg-info',
-    2 => 'badge bg-success',
-    3 => 'badge bg-danger',
+    0 => 'badge bg-secondary text-dark',
+    1 => 'badge bg-info text-dark',
+    2 => 'badge bg-success text-dark',
+    3 => 'badge bg-danger text-dark',
     4 => 'badge bg-dark',
     5 => 'badge bg-warning text-dark',
 ];
@@ -254,35 +254,50 @@ if (empty($logs) && $pagestart == 0) {
         $senders = [];
     }
 
+    $activelogids = [];
+
     foreach ($logs as $log) {
         $sendername = isset($senders[$log->userfrom]) ? fullname($senders[$log->userfrom]) : '-';
 
         $statusbadge = html_writer::span(
             $statuslabels[$log->status] ?? $log->status,
-            $statusclasses[$log->status] ?? 'badge bg-secondary'
+            $statusclasses[$log->status] ?? 'badge bg-secondary',
+            ['id' => 'bmsg-status-' . $log->id]
         );
 
         // Progress display.
         $processed = $log->sentcount + $log->failedcount;
-        if ($log->recipientcount > 0 && !in_array((int)$log->status, [0])) {
-            $pct = round(($processed / $log->recipientcount) * 100);
-            $progress = html_writer::div(
-                html_writer::div('', 'progress-bar bg-success', [
-                    'role' => 'progressbar',
-                    'style' => "width: {$pct}%",
-                    'aria-valuenow' => $pct,
-                    'aria-valuemin' => 0,
-                    'aria-valuemax' => 100,
-                ]),
-                'progress', ['style' => 'height: 20px; min-width: 80px;']
-            );
-            $progress .= html_writer::tag('small',
-                "{$log->sentcount}" . ($log->failedcount > 0 ? " / {$log->failedcount} " .
-                get_string('failed', 'tool_bulkmessaging') : '') .
-                " ({$pct}%)"
-            );
-        } else {
-            $progress = '-';
+        $isactive = !in_array((int)$log->status, [0]);
+        $showprogress = $log->recipientcount > 0 && $isactive;
+        $pct = $showprogress ? round(($processed / $log->recipientcount) * 100) : 0;
+
+        $progressbar = html_writer::div(
+            html_writer::div('', 'progress-bar bg-success', [
+                'role' => 'progressbar',
+                'style' => "width: {$pct}%",
+                'aria-valuenow' => $pct,
+                'aria-valuemin' => 0,
+                'aria-valuemax' => 100,
+            ]),
+            'progress', [
+                'style' => 'height: 20px; min-width: 80px;' . ($showprogress ? '' : ' display: none;'),
+            ]
+        );
+
+        $countstext = $showprogress
+            ? "{$log->sentcount}" . ($log->failedcount > 0 ? " / {$log->failedcount} " .
+                get_string('failed', 'tool_bulkmessaging') : '') . " ({$pct}%)"
+            : '-';
+        $countshtml = html_writer::tag('small', $countstext, [
+            'class' => 'bmsg-counts',
+            'style' => $showprogress ? '' : 'display: none;',
+        ]);
+
+        $progress = html_writer::span($progressbar . $countshtml, '', ['id' => 'bmsg-progress-' . $log->id]);
+
+        // Track active log IDs for AJAX polling.
+        if (in_array((int)$log->status, [0, 1])) {
+            $activelogids[] = (int) $log->id;
         }
 
         // Action icons.
@@ -293,40 +308,50 @@ if (empty($logs) && $pagestart == 0) {
         $actions[] = tool_bulkmessaging_action_icon($viewurl, 't/viewdetails', get_string('view'));
 
         // Cancel — queued (status 0).
-        if ($log->status == 0) {
-            $cancelurl = new moodle_url($baseurl, ['cancel' => $log->id, 'sesskey' => sesskey()]);
-            $actions[] = tool_bulkmessaging_action_icon($cancelurl, 't/block',
+        $cancelurl = new moodle_url($baseurl, ['cancel' => $log->id, 'sesskey' => sesskey()]);
+        $cancelstyle = ($log->status == 0) ? '' : 'display: none;';
+        $actions[] = html_writer::span(
+            tool_bulkmessaging_action_icon($cancelurl, 't/block',
                 get_string('cancel'), [
                     'onclick' => "return confirm('" . get_string('confirmcancel', 'tool_bulkmessaging') . "');",
-                ]);
-        }
+                ]),
+            '', ['data-action' => 'cancel', 'style' => $cancelstyle]
+        );
 
         // Stop — processing (status 1).
-        if ($log->status == 1) {
-            $stopurl = new moodle_url($baseurl, ['stop' => $log->id, 'sesskey' => sesskey()]);
-            $actions[] = tool_bulkmessaging_action_icon($stopurl, 't/stop',
+        $stopurl = new moodle_url($baseurl, ['stop' => $log->id, 'sesskey' => sesskey()]);
+        $stopstyle = ($log->status == 1) ? '' : 'display: none;';
+        $actions[] = html_writer::span(
+            tool_bulkmessaging_action_icon($stopurl, 't/stop',
                 get_string('stop', 'tool_bulkmessaging'), [
                     'onclick' => "return confirm('" . get_string('confirmstop', 'tool_bulkmessaging') . "');",
-                ]);
-        }
+                ]),
+            '', ['data-action' => 'stop', 'style' => $stopstyle]
+        );
 
         // Start — failed or stopped (status 3 or 5).
-        if (in_array((int)$log->status, [3, 5])) {
-            $starturl = new moodle_url($baseurl, ['start' => $log->id, 'sesskey' => sesskey()]);
-            $actions[] = tool_bulkmessaging_action_icon($starturl, 't/play',
+        $starturl = new moodle_url($baseurl, ['start' => $log->id, 'sesskey' => sesskey()]);
+        $startstyle = in_array((int)$log->status, [3, 5]) ? '' : 'display: none;';
+        $actions[] = html_writer::span(
+            tool_bulkmessaging_action_icon($starturl, 't/play',
                 get_string('start', 'tool_bulkmessaging'), [
                     'onclick' => "return confirm('" . get_string('confirmstart', 'tool_bulkmessaging') . "');",
-                ]);
-        }
+                ]),
+            '', ['data-action' => 'start', 'style' => $startstyle]
+        );
 
         // Delete — finished statuses (completed, failed, cancelled, stopped).
-        if (in_array((int)$log->status, [2, 3, 4, 5])) {
-            $deleteurl = new moodle_url($baseurl, ['delete' => $log->id, 'sesskey' => sesskey()]);
-            $actions[] = tool_bulkmessaging_action_icon($deleteurl, 't/delete',
+        $deleteurl = new moodle_url($baseurl, ['delete' => $log->id, 'sesskey' => sesskey()]);
+        $deletestyle = in_array((int)$log->status, [2, 3, 4, 5]) ? '' : 'display: none;';
+        $actions[] = html_writer::span(
+            tool_bulkmessaging_action_icon($deleteurl, 't/delete',
                 get_string('delete'), [
                     'onclick' => "return confirm('" . get_string('confirmdelete', 'tool_bulkmessaging') . "');",
-                ]);
-        }
+                ]),
+            '', ['data-action' => 'delete', 'style' => $deletestyle]
+        );
+
+        $actionshtml = html_writer::span(implode(' ', $actions), '', ['id' => 'bmsg-actions-' . $log->id]);
 
         $table->add_data([
             s($log->subject),
@@ -335,11 +360,15 @@ if (empty($logs) && $pagestart == 0) {
             $progress,
             $statusbadge,
             userdate($log->timecreated),
-            implode(' ', $actions),
+            $actionshtml,
         ]);
     }
 
     $table->finish_output();
+
+    if (!empty($activelogids)) {
+        $PAGE->requires->js_call_amd('tool_bulkmessaging/progress_tracker', 'init', [$activelogids]);
+    }
 }
 
 echo $OUTPUT->footer();

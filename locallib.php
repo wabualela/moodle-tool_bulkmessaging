@@ -41,6 +41,12 @@ function tool_bulkmessaging_render_tabs(string $selected): string {
                 get_string('sendmessage', 'tool_bulkmessaging')
         ),
         new tabobject(
+            'csvupload',
+            new moodle_url("/$CFG->admin/tool/bulkmessaging/csvupload.php"),
+            $OUTPUT->pix_icon('i/import', '', 'moodle', ['class' => 'iconsmall']) . ' ' .
+                get_string('csvupload', 'tool_bulkmessaging')
+        ),
+        new tabobject(
             'history',
             new moodle_url("/$CFG->admin/tool/bulkmessaging/history.php"),
             $OUTPUT->pix_icon('t/viewdetails', '', 'moodle', ['class' => 'iconsmall']) . ' ' .
